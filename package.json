@@ -1,0 +1,49 @@
+{
+    "author": "Legitimate Software",
+    "dependencies": {
+        "@rebble/clay": "^1.0.4"
+    },
+    "keywords": [],
+    "name": "pebgobrrrr",
+    "pebble": {
+        "displayName": "PebGoBrrrr",
+        "enableMultiJS": true,
+        "messageKeys": [
+            "PatternMode",
+            "OutputMode",
+            "BuzzShortMs",
+            "BuzzLongMs",
+            "GapDigitMs",
+            "GapCharMs",
+            "GapGroupMs",
+            "LongBuzzHours"
+        ],
+        "projectType": "native",
+        "resources": {
+            "media": [
+                {
+                    "file": "images/PebGoBrrrr",
+                    "menuIcon": true,
+                    "name": "PEBGOBRRRR_ICON",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                }
+            ]
+        },
+        "sdkVersion": "3",
+        "targetPlatforms": [
+            "aplite",
+            "basalt",
+            "chalk",
+            "diorite",
+            "emery",
+            "gabbro",
+            "flint"
+        ],
+        "uuid": "61eb729c-7c0d-4308-aef9-1dc1c32f7d28",
+        "watchapp": {
+            "watchface": false
+        }
+    },
+    "version": "1.3.0"
+}
