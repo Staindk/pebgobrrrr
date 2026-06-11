@@ -34,6 +34,7 @@ void vibe_config_set_buzz_long(uint32_t ms);
 void vibe_config_set_gap_digit(uint32_t ms);
 void vibe_config_set_gap_char(uint32_t ms);
 void vibe_config_set_gap_group(uint32_t ms);
+void vibe_config_set_delay(uint32_t ms);
 
 // Fire the vibration sequence for the current time. Returns total duration in ms.
 uint32_t vibe_speak_time(void);

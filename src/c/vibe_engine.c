@@ -14,6 +14,7 @@
 #define DEFAULT_GAP_DIGIT_MS   120u
 #define DEFAULT_GAP_CHAR_MS    350u
 #define DEFAULT_GAP_GROUP_MS   800u
+#define DEFAULT_DELAY_MS         0u
 #define MIN_BUZZ_SHORT_MS       50u
 #define MAX_BUZZ_SHORT_MS      200u
 #define MIN_BUZZ_LONG_MS       100u
@@ -24,6 +25,8 @@
 #define MAX_GAP_CHAR_MS        600u
 #define MIN_GAP_GROUP_MS       400u
 #define MAX_GAP_GROUP_MS      1500u
+#define MIN_DELAY_MS             0u
+#define MAX_DELAY_MS          5000u
 
 // ---------------------------------------------------------------------------
 // Compile-time guard - VibePattern max is 256 segments
@@ -47,6 +50,7 @@ _Static_assert(MORSE_MAX_SEGMENTS <= MAX_VIBE_SEGMENTS,
 #define PERSIST_KEY_GAP_CHAR         6
 #define PERSIST_KEY_GAP_GROUP        7
 #define PERSIST_KEY_LONG_BUZZ_HOURS  8
+#define PERSIST_KEY_DELAY            9
 
 // ---------------------------------------------------------------------------
 // Runtime config state
@@ -60,6 +64,12 @@ static uint32_t s_buzz_long  = DEFAULT_BUZZ_LONG_MS;
 static uint32_t s_gap_digit  = DEFAULT_GAP_DIGIT_MS;
 static uint32_t s_gap_char   = DEFAULT_GAP_CHAR_MS;
 static uint32_t s_gap_group  = DEFAULT_GAP_GROUP_MS;
+static uint32_t s_delay      = DEFAULT_DELAY_MS;
+
+// Delayed playback state
+static AppTimer *s_delay_timer = NULL;
+static uint32_t s_pending_segments[MAX_VIBE_SEGMENTS];
+static uint16_t s_pending_count = 0;
 
 static uint32_t clamp_u32(uint32_t value, uint32_t min_value, uint32_t max_value) {
     if (value < min_value) return min_value;
@@ -124,6 +134,10 @@ void vibe_config_set_gap_group(uint32_t ms) {
     s_gap_group = clamp_u32(ms, MIN_GAP_GROUP_MS, MAX_GAP_GROUP_MS);
     persist_write_int(PERSIST_KEY_GAP_GROUP, (int)s_gap_group);
 }
+void vibe_config_set_delay(uint32_t ms) {
+    s_delay = clamp_u32(ms, MIN_DELAY_MS, MAX_DELAY_MS);
+    persist_write_int(PERSIST_KEY_DELAY, (int)s_delay);
+}
 
 void vibe_config_load(void) {
     if (persist_exists(PERSIST_KEY_MODE)) {
@@ -147,6 +161,9 @@ void vibe_config_load(void) {
     }
     if (persist_exists(PERSIST_KEY_GAP_GROUP)) {
         s_gap_group = clamp_u32((uint32_t)persist_read_int(PERSIST_KEY_GAP_GROUP), MIN_GAP_GROUP_MS, MAX_GAP_GROUP_MS);
+    }
+    if (persist_exists(PERSIST_KEY_DELAY)) {
+        s_delay = clamp_u32((uint32_t)persist_read_int(PERSIST_KEY_DELAY), MIN_DELAY_MS, MAX_DELAY_MS);
     }
 }
 
@@ -271,7 +288,28 @@ static bool build_morse(VibeSequence *seq, uint8_t hour, uint8_t minute, bool in
 }
 
 // ---------------------------------------------------------------------------
-// Calculate the vibe pattern for the current time and fire it. Return total duration in ms.
+// Delayed playback
+// ---------------------------------------------------------------------------
+
+static void delay_timer_callback(void *context) {
+    s_delay_timer = NULL;
+
+    if (s_pending_count == 0) {
+        APP_LOG(APP_LOG_LEVEL_ERROR, "delay_timer_callback: no pending pattern");
+        return;
+    }
+
+    VibePattern pat = {
+        .durations    = s_pending_segments,
+        .num_segments = s_pending_count,
+    };
+
+    vibes_enqueue_custom_pattern(pat);
+}
+
+// ---------------------------------------------------------------------------
+// Calculate the vibe pattern for the current time and fire it.
+// Return total lifetime in ms including initial delay.
 // ---------------------------------------------------------------------------
 
 uint32_t vibe_speak_time(void) {
@@ -281,7 +319,7 @@ uint32_t vibe_speak_time(void) {
     uint8_t hour   = (uint8_t)t->tm_hour;
     uint8_t minute = (uint8_t)t->tm_min;
 
-    uint32_t total_duration_ms = 0;
+    uint32_t pattern_duration_ms = 0;
 
     // 12-hour conversion
     if (hour == 0)      hour = 12;
@@ -332,16 +370,37 @@ uint32_t vibe_speak_time(void) {
         return 0;
     }
 
+    for (uint16_t i = 0; i < seq.count; ++i) {
+        pattern_duration_ms += seq.segments[i];
+    }
+
+    // Cancel any prior delayed playback and replace it
+    if (s_delay_timer) {
+        app_timer_cancel(s_delay_timer);
+        s_delay_timer = NULL;
+    }
+    s_pending_count = 0;
+
+    if (s_delay > 0) {
+        s_pending_count = seq.count;
+        for (uint16_t i = 0; i < seq.count; ++i) {
+            s_pending_segments[i] = seq.segments[i];
+        }
+
+        s_delay_timer = app_timer_register(s_delay, delay_timer_callback, NULL);
+        if (!s_delay_timer) {
+            APP_LOG(APP_LOG_LEVEL_ERROR, "vibe_speak_time: failed to register delay timer");
+            return 0;
+        }
+
+        return s_delay + pattern_duration_ms;
+    }
+
     VibePattern pat = {
         .durations    = seq.segments,
         .num_segments = seq.count,
     };
 
     vibes_enqueue_custom_pattern(pat);
-
-    for (uint16_t i = 0; i < seq.count; ++i) {
-        total_duration_ms += seq.segments[i];
-    }
-
-    return total_duration_ms;
+    return pattern_duration_ms;
 }

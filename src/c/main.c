@@ -19,6 +19,95 @@ static TextLayer *s_mode_layer;
 static TextLayer *s_hint_layer;
 static AppTimer  *s_exit_timer;
 
+// Progress bar
+static Layer     *s_progress_layer;
+static AppTimer  *s_progress_timer;
+static uint32_t   s_progress_total_ms;
+static uint32_t   s_progress_elapsed_ms;
+static bool       s_progress_running;
+
+// ---------------------------------------------------------------------------
+// Progress bar
+// ---------------------------------------------------------------------------
+
+#define PROGRESS_BAR_HEIGHT 10
+#define PROGRESS_TIMER_TICK_MS 100
+
+static void progress_layer_update(Layer *layer, GContext *ctx) {
+    GRect bounds = layer_get_bounds(layer);
+
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_rect(ctx, bounds, 0, GCornerNone);
+
+    if (!s_progress_running || s_progress_total_ms == 0) {
+        return;
+    }
+
+    int16_t remaining_w = (int16_t)((((uint64_t)bounds.size.w) *
+        (s_progress_total_ms - s_progress_elapsed_ms)) / s_progress_total_ms);
+
+    if (remaining_w < 0) remaining_w = 0;
+    if (remaining_w > bounds.size.w) remaining_w = bounds.size.w;
+
+    graphics_context_set_fill_color(ctx, GColorLightGray);
+    graphics_fill_rect(ctx, GRect(bounds.size.w - remaining_w, 0, remaining_w, bounds.size.h), 0, GCornerNone);
+}
+
+static void progress_timer_callback(void *context) {
+    s_progress_timer = NULL;
+
+    if (!s_progress_running) {
+        return;
+    }
+
+    if (s_progress_elapsed_ms + PROGRESS_TIMER_TICK_MS >= s_progress_total_ms) {
+        s_progress_elapsed_ms = s_progress_total_ms;
+        layer_mark_dirty(s_progress_layer);
+        s_progress_running = false;
+        return;
+    }
+
+    s_progress_elapsed_ms += PROGRESS_TIMER_TICK_MS;
+    layer_mark_dirty(s_progress_layer);
+    s_progress_timer = app_timer_register(PROGRESS_TIMER_TICK_MS, progress_timer_callback, NULL);
+}
+
+static void progress_start(uint32_t total_ms) {
+    if (s_progress_timer) {
+        app_timer_cancel(s_progress_timer);
+        s_progress_timer = NULL;
+    }
+
+    s_progress_total_ms = total_ms;
+    s_progress_elapsed_ms = 0;
+    s_progress_running = (total_ms > 0);
+
+    if (s_progress_layer) {
+        layer_set_hidden(s_progress_layer, !s_progress_running);
+        layer_mark_dirty(s_progress_layer);
+    }
+
+    if (s_progress_running) {
+        s_progress_timer = app_timer_register(PROGRESS_TIMER_TICK_MS, progress_timer_callback, NULL);
+    }
+}
+
+static void progress_stop(void) {
+    if (s_progress_timer) {
+        app_timer_cancel(s_progress_timer);
+        s_progress_timer = NULL;
+    }
+
+    s_progress_running = false;
+    s_progress_total_ms = 0;
+    s_progress_elapsed_ms = 0;
+
+    if (s_progress_layer) {
+        layer_set_hidden(s_progress_layer, true);
+        layer_mark_dirty(s_progress_layer);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Splash window
 // ---------------------------------------------------------------------------
@@ -38,6 +127,11 @@ static void window_load(Window *window) {
 
     int16_t w = bounds.size.w;
     int16_t h = bounds.size.h;
+
+    s_progress_layer = layer_create(GRect(0, 0, w, PROGRESS_BAR_HEIGHT));
+    layer_set_update_proc(s_progress_layer, progress_layer_update);
+    layer_set_hidden(s_progress_layer, true);
+    layer_add_child(root, s_progress_layer);
 
     // Compact layout for shorter displays
     bool compact = h < 160;
@@ -63,8 +157,8 @@ static void window_load(Window *window) {
     int16_t available_h = h - (vertical_margin * 2);
     int16_t top = vertical_margin + ((available_h - content_h) / 2);
 
-    if (top < vertical_margin) {
-        top = vertical_margin;
+    if (top < vertical_margin + PROGRESS_BAR_HEIGHT + 2) {
+        top = vertical_margin + PROGRESS_BAR_HEIGHT + 2;
     }
 
     int16_t y = top;
@@ -109,15 +203,22 @@ static void window_load(Window *window) {
 
     update_mode_layers();
 }
+
 static void window_unload(Window *window) {
     if (s_exit_timer) {
         app_timer_cancel(s_exit_timer);
         s_exit_timer = NULL;
     }
+    if (s_progress_timer) {
+        app_timer_cancel(s_progress_timer);
+        s_progress_timer = NULL;
+    }
+
     text_layer_destroy(s_title_layer);
     text_layer_destroy(s_pattern_label_layer);
     text_layer_destroy(s_mode_layer);
     text_layer_destroy(s_hint_layer);
+    layer_destroy(s_progress_layer);
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +277,9 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
     if ((t = dict_find(iter, MESSAGE_KEY_GapGroupMs)))
         vibe_config_set_gap_group((uint32_t)t->value->int32);
 
+    if ((t = dict_find(iter, MESSAGE_KEY_DelayMs)))
+        vibe_config_set_delay((uint32_t)t->value->int32);
+
     // Toggle - Clay sends 0/1 as integer
     if ((t = dict_find(iter, MESSAGE_KEY_LongBuzzHours)))
         vibe_config_set_long_buzz_hours((bool)t->value->int32);
@@ -218,8 +322,9 @@ static void init(void) {
     // Normal launch: auto-exit after vibration sequence.
     // Config launch: stay open until inbox_received closes us.
     if (!config_launch) {
-        uint32_t s_exit_duration = vibe_speak_time();
-        s_exit_timer = app_timer_register(s_exit_duration + 2000, exit_timer_callback, NULL);
+        uint32_t exit_duration_ms = vibe_speak_time();
+        progress_start(exit_duration_ms + 2000);
+        s_exit_timer = app_timer_register(exit_duration_ms + 2000, exit_timer_callback, NULL);
     }
 }
 

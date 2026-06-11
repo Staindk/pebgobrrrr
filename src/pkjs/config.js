@@ -120,6 +120,29 @@ module.exports = [
   },
 
   {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Buzz delay"
+      },
+      {
+        "type": "text",
+        "defaultValue": "Delay before buzz pattern starts"
+      },
+      {
+        "type": "slider",
+        "messageKey": "DelayMs",
+        "label": "Delay (ms)",
+        "defaultValue": 0,
+        "min": 0,
+        "max": 5000,
+        "step": 500
+      }
+    ]
+  },
+
+  {
     "type": "submit",
     "defaultValue": "Save Settings"
   }
