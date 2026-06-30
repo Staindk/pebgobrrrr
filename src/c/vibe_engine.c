@@ -78,7 +78,15 @@ static uint32_t clamp_u32(uint32_t value, uint32_t min_value, uint32_t max_value
 }
 
 static VibePatternMode sanitize_pattern_mode(int value) {
-    return (value == PATTERN_MORSE) ? PATTERN_MORSE : PATTERN_DIGIT_GROUP;
+    switch (value) {
+        case PATTERN_MORSE:
+            return PATTERN_MORSE;
+        case PATTERN_SHORTHAND:
+            return PATTERN_SHORTHAND;
+        case PATTERN_DIGIT_GROUP:
+        default:
+            return PATTERN_DIGIT_GROUP;
+    }
 }
 
 static VibeOutputMode sanitize_output_mode(int value) {
@@ -288,6 +296,58 @@ static bool build_morse(VibeSequence *seq, uint8_t hour, uint8_t minute, bool in
 }
 
 // ---------------------------------------------------------------------------
+// Shorthand pattern
+//
+// Hours: current hour mod 6 (22:00 becomes 4)
+// Minutes: divided by 15 and long-buzzed, then remainder minutes mod 15 as short buzzes
+//
+// Note: include_minutes and OUTPUT_ROUND10 do not work right with this pattern.
+// ---------------------------------------------------------------------------
+
+static bool build_shorthand(VibeSequence *seq, uint8_t hour, uint8_t minute, bool include_minutes) {
+    // Convert hour to 0-5 range (mod 6)
+    uint8_t hour_mod = hour % 6;
+    
+    // If hour_mod is 0, that means it's exactly on the 6-hour mark (0, 6, 12, 18)
+    // We'll add a 300ms delay to distinguish from times with no hour buzzes
+    // This helps distinguish e.g. 18:01 (which would otherwise be just 1 buzz) from 19:00
+    if (hour_mod == 0) {
+        if (!seq_push(seq, 300)) return false; // 300ms delay
+    }
+
+    // Encode hours as short buzzes
+    for (uint8_t i = 0; i < hour_mod; i++) {
+        bool last_buzz = (i == hour_mod - 1);
+        uint32_t gap = last_buzz ? (include_minutes ? s_gap_group : 0) : s_gap_digit;
+        if (!seq_buzz(seq, s_buzz_short, gap)) return false;
+    }
+
+    if (include_minutes) {
+        // Minutes divided by 15 = number of long buzzes
+        uint8_t long_buzzes = minute / 15;
+        
+        // Encode long buzzes for 15-minute intervals
+        for (uint8_t i = 0; i < long_buzzes; i++) {
+            bool last_buzz = (i == long_buzzes - 1);
+            uint32_t gap = last_buzz ? s_gap_char : s_gap_digit;
+            if (!seq_buzz(seq, s_buzz_long, gap)) return false;
+        }
+        
+        // Remainder minutes mod 15 = number of short buzzes
+        uint8_t short_buzzes = minute % 15;
+        
+        // Encode short buzzes for remaining minutes
+        for (uint8_t i = 0; i < short_buzzes; i++) {
+            bool last_buzz = (i == short_buzzes - 1);
+            uint32_t gap = last_buzz ? 0 : s_gap_digit;
+            if (!seq_buzz(seq, s_buzz_short, gap)) return false;
+        }
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Delayed playback
 // ---------------------------------------------------------------------------
 
@@ -362,6 +422,9 @@ uint32_t vibe_speak_time(void) {
             break;
         case PATTERN_MORSE:
             ok = build_morse(&seq, hour, minute, include_minutes);
+            break;
+        case PATTERN_SHORTHAND:
+            ok = build_shorthand(&seq, hour, minute, include_minutes);
             break;
     }
 

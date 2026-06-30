@@ -22,7 +22,8 @@ module.exports = [
         "defaultValue": "0",
         "options": [
           { "label": "Digit Groups", "value": "0" },
-          { "label": "Morse",        "value": "1" }
+          { "label": "Morse",        "value": "1" },
+          { "label": "Shorthand",    "value": "2" }
         ]
       },
       {

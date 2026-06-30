@@ -9,6 +9,7 @@
 typedef enum {
     PATTERN_DIGIT_GROUP = 0,
     PATTERN_MORSE       = 1,
+    PATTERN_SHORTHAND   = 2,
 } VibePatternMode;
 
 // Output (time detail) modes
