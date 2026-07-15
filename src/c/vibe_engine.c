@@ -299,48 +299,46 @@ static bool build_morse(VibeSequence *seq, uint8_t hour, uint8_t minute, bool in
 // Shorthand pattern
 //
 // Hours: current hour mod 6 (22:00 becomes 4)
-// Minutes: divided by 15 and long-buzzed, then remainder minutes mod 15 as short buzzes
-//
-// Note: include_minutes and OUTPUT_ROUND10 do not work right with this pattern.
+// Minutes: encoded as per digit groups, except if the second minute group is
+//          greater than 5 it long buzzes the second group and then short 
+//          buzzes the remainder (e.g. 27 => 2, then 1 (long buzz), then 2).
 // ---------------------------------------------------------------------------
 
 static bool build_shorthand(VibeSequence *seq, uint8_t hour, uint8_t minute, bool include_minutes) {
     // Convert hour to 0-5 range (mod 6)
     uint8_t hour_mod = hour % 6;
     
-    // If hour_mod is 0, that means it's exactly on the 6-hour mark (0, 6, 12, 18)
-    // We'll add a 300ms delay to distinguish from times with no hour buzzes
-    // This helps distinguish e.g. 18:01 (which would otherwise be just 1 buzz) from 19:00
-    if (hour_mod == 0) {
-        if (!seq_push(seq, 300)) return false; // 300ms delay
-    }
-
-    // Encode hours as short buzzes
-    for (uint8_t i = 0; i < hour_mod; i++) {
-        bool last_buzz = (i == hour_mod - 1);
-        uint32_t gap = last_buzz ? (include_minutes ? s_gap_group : 0) : s_gap_digit;
-        if (!seq_buzz(seq, s_buzz_short, gap)) return false;
-    }
+    // Buzz hours. If hour_mod is 0, we long buzz to indicate 6/12/18/00 hours
+    if (!encode_digit(seq, hour_mod, s_buzz_short, s_gap_char)) return false;
 
     if (include_minutes) {
-        // Minutes divided by 15 = number of long buzzes
-        uint8_t long_buzzes = minute / 15;
-        
-        // Encode long buzzes for 15-minute intervals
-        for (uint8_t i = 0; i < long_buzzes; i++) {
-            bool last_buzz = (i == long_buzzes - 1);
-            uint32_t gap = last_buzz ? s_gap_char : s_gap_digit;
-            if (!seq_buzz(seq, s_buzz_long, gap)) return false;
-        }
-        
-        // Remainder minutes mod 15 = number of short buzzes
-        uint8_t short_buzzes = minute % 15;
-        
-        // Encode short buzzes for remaining minutes
-        for (uint8_t i = 0; i < short_buzzes; i++) {
-            bool last_buzz = (i == short_buzzes - 1);
-            uint32_t gap = last_buzz ? 0 : s_gap_digit;
-            if (!seq_buzz(seq, s_buzz_short, gap)) return false;
+        uint8_t m1 = minute / 10;
+        uint8_t m2 = minute % 10;
+
+        // In round-to-10 mode, suppress a trailing zero minute digit:
+        // 7:40 => 7, gap, 4
+        // not 7, gap, 4, gap, 0
+        bool suppress_trailing_zero = (s_output_mode == OUTPUT_ROUND10 && m2 == 0);
+
+        bool m2_split = m2 >= 5;
+        bool m2_split_remainder = (m2 % 5) > 0;
+
+        if (suppress_trailing_zero) {
+            if (!encode_digit(seq, m1, s_buzz_short, 0)) return false;
+        } else {
+            if (!encode_digit(seq, m1, s_buzz_short, s_gap_char)) return false;
+
+            if (m2_split) {
+                // m2 greater than or equal to 5
+                if (!encode_digit(seq, 1, s_buzz_long, s_gap_char))          return false;
+                if (m2_split_remainder) {
+                    // m2 remainder is greater than 0
+                    if (!encode_digit(seq, m2%5, s_buzz_short, 0))          return false;
+                }
+            } else if (m2 != 0) {
+                // m2 is less than 5 but more than 0
+                if (!encode_digit(seq, m2, s_buzz_short, 0))          return false;
+            }
         }
     }
 
