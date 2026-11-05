@@ -118,7 +118,14 @@ static void exit_timer_callback(void *context) {
 }
 
 static void update_mode_layers(void) {
-    text_layer_set_text(s_mode_layer, vibe_config_get_mode() == PATTERN_MORSE ? "Morse" : "Digit Groups");
+    VibePatternMode mode = vibe_config_get_mode();
+    if (mode == PATTERN_DIGIT_GROUP) {
+        text_layer_set_text(s_mode_layer, "Digit Groups");
+    } else if (mode == PATTERN_MORSE) {
+        text_layer_set_text(s_mode_layer, "Morse");
+    } else if (mode == PATTERN_SHORTHAND) {
+        text_layer_set_text(s_mode_layer, "Shorthand");
+    }
 }
 
 static void window_load(Window *window) {
@@ -230,7 +237,15 @@ static void select_click(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void select_long_press(ClickRecognizerRef recognizer, void *context) {
-    VibePatternMode next = (vibe_config_get_mode() == PATTERN_DIGIT_GROUP) ? PATTERN_MORSE : PATTERN_DIGIT_GROUP;
+    VibePatternMode current = vibe_config_get_mode();
+    VibePatternMode next = PATTERN_DIGIT_GROUP;
+    if (current == PATTERN_DIGIT_GROUP) {
+        next = PATTERN_MORSE;
+    } else if (current == PATTERN_MORSE) {
+        next = PATTERN_SHORTHAND;
+    } else if (current == PATTERN_SHORTHAND) {
+        next = PATTERN_DIGIT_GROUP;
+    }
     vibe_config_set_mode(next);
     update_mode_layers();
     vibe_speak_time();

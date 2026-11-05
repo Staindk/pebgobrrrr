@@ -78,7 +78,15 @@ static uint32_t clamp_u32(uint32_t value, uint32_t min_value, uint32_t max_value
 }
 
 static VibePatternMode sanitize_pattern_mode(int value) {
-    return (value == PATTERN_MORSE) ? PATTERN_MORSE : PATTERN_DIGIT_GROUP;
+    switch (value) {
+        case PATTERN_MORSE:
+            return PATTERN_MORSE;
+        case PATTERN_SHORTHAND:
+            return PATTERN_SHORTHAND;
+        case PATTERN_DIGIT_GROUP:
+        default:
+            return PATTERN_DIGIT_GROUP;
+    }
 }
 
 static VibeOutputMode sanitize_output_mode(int value) {
@@ -288,6 +296,56 @@ static bool build_morse(VibeSequence *seq, uint8_t hour, uint8_t minute, bool in
 }
 
 // ---------------------------------------------------------------------------
+// Shorthand pattern
+//
+// Hours: current hour mod 6 (22:00 becomes 4)
+// Minutes: encoded as per digit groups, except if the second minute group is
+//          greater than 5 it long buzzes the second group and then short 
+//          buzzes the remainder (e.g. 27 => 2, then 1 (long buzz), then 2).
+// ---------------------------------------------------------------------------
+
+static bool build_shorthand(VibeSequence *seq, uint8_t hour, uint8_t minute, bool include_minutes) {
+    // Convert hour to 0-5 range (mod 6)
+    uint8_t hour_mod = hour % 6;
+    
+    // Buzz hours. If hour_mod is 0, we long buzz to indicate 6/12/18/00 hours
+    if (!encode_digit(seq, hour_mod, s_buzz_short, s_gap_char)) return false;
+
+    if (include_minutes) {
+        uint8_t m1 = minute / 10;
+        uint8_t m2 = minute % 10;
+
+        // In round-to-10 mode, suppress a trailing zero minute digit:
+        // 7:40 => 7, gap, 4
+        // not 7, gap, 4, gap, 0
+        bool suppress_trailing_zero = (s_output_mode == OUTPUT_ROUND10 && m2 == 0);
+
+        bool m2_split = m2 >= 5;
+        bool m2_split_remainder = (m2 % 5) > 0;
+
+        if (suppress_trailing_zero) {
+            if (!encode_digit(seq, m1, s_buzz_short, 0)) return false;
+        } else {
+            if (!encode_digit(seq, m1, s_buzz_short, s_gap_char)) return false;
+
+            if (m2_split) {
+                // m2 greater than or equal to 5
+                if (!encode_digit(seq, 1, s_buzz_long, s_gap_char))          return false;
+                if (m2_split_remainder) {
+                    // m2 remainder is greater than 0
+                    if (!encode_digit(seq, m2%5, s_buzz_short, 0))          return false;
+                }
+            } else if (m2 != 0) {
+                // m2 is less than 5 but more than 0
+                if (!encode_digit(seq, m2, s_buzz_short, 0))          return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Delayed playback
 // ---------------------------------------------------------------------------
 
@@ -362,6 +420,9 @@ uint32_t vibe_speak_time(void) {
             break;
         case PATTERN_MORSE:
             ok = build_morse(&seq, hour, minute, include_minutes);
+            break;
+        case PATTERN_SHORTHAND:
+            ok = build_shorthand(&seq, hour, minute, include_minutes);
             break;
     }
 
